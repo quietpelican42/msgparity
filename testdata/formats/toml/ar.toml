@@ -1,0 +1,10 @@
+[Greeting]
+other = "مرحبا {{.Name}}! لديك {{.Count}} رسالة."
+
+[PersonCats]
+zero = "{{.Name}} ليس لديه قطط."
+one = "{{.Name}} لديه قطة واحدة."
+two = "{{.Name}} لديه قطتان."
+few = "{{.Name}} لديه {{.Count}} قطط."
+many = "{{.Name}} لديه {{.Count}} قطة."
+other = "{{.Name}} لديه {{.Count}} قطة."

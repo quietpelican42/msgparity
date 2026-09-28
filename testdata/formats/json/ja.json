@@ -1,0 +1,8 @@
+{
+  "Greeting": {
+    "other": "こんにちは、{{.Name}}さん！{{.Count}}件のメッセージがあります。"
+  },
+  "PersonCats": {
+    "other": "{{.Name}}は{{.Count}}匹の猫を飼っています。"
+  }
+}

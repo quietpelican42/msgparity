@@ -1,0 +1,6 @@
+[Greeting]
+other = "Hola!"
+
+[PersonCats]
+one = "{{.Name}} tiene {{.Count}} gato."
+other = "{{.Name}} tiene {{.Count}} gatos."

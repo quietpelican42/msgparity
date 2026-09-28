@@ -1,0 +1,7 @@
+Greeting:
+  other: "Cześć, {{.Name}}! Masz {{.Count}} wiadomości."
+PersonCats:
+  one: "{{.Name}} ma {{.Count}} kota."
+  few: "{{.Name}} ma {{.Count}} koty."
+  many: "{{.Name}} ma {{.Count}} kotów."
+  other: "{{.Name}} ma {{.Count}} kota."
