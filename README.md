@@ -33,6 +33,16 @@ message with the right plural count:
 `goi18n merge` only tracks which message IDs have a translation; it never
 looks at what a translation's template actions or plural forms are.
 
+A placeholder can also go missing from one specific plural form while
+staying in a sibling form, which comparing only the set of fields used
+*anywhere* in a translation (its union across forms) cannot see: a Polish
+`one` form that drops `{{.Name}}` while the `other` form keeps it leaves the
+union unchanged, so a union-only check stays quiet while a user who
+triggers exactly the `one` form gets a nameless message. `placeholder-missing-form`
+compares each translated form against what the source's own forms have in
+common, not their union, so this does not also flag every form that
+legitimately varies which fields it uses (see Reference).
+
 Measured: `goi18n merge en.toml es.toml`, where `es.toml`'s only translated
 string drops both placeholders the source message uses:
 
@@ -131,13 +141,14 @@ fields, err := msgparity.TemplateFields("{{.Name}} has {{.Count}} cats.", "", ""
 ### CLI
 
 ```
-msgparity check [--source <locale>] [--format text|json|github] <dir|files...>
+msgparity check [--source <locale>] [--format text|json|github] [--count-field <name>] <dir|files...>
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--source` | `en` | Locale every other locale's messages are checked against. |
 | `--format` | `text` | `text`, `json`, or `github`. |
+| `--count-field` | `Count` | TemplateData field name `placeholder-missing-form` treats as the plural count and does not require in every plural form. |
 
 Exit codes: `0` no findings, `1` findings (error or warning severity), `2`
 could not load or parse the input (bad flags, missing directory, no message
@@ -147,7 +158,8 @@ file for the source locale, an unparsable file).
 
 | Rule | Severity | Fires when |
 | --- | --- | --- |
-| `placeholder-missing` | error | A translation's plural forms, together, reference fewer template fields than the source message. |
+| `placeholder-missing` | error | A translation's plural forms, together, reference fewer template fields than the source message (a union-level check). |
+| `placeholder-missing-form` | error | One translated plural form drops a field every one of the source message's forms uses, excluding `--count-field` (a per-form check; catches drops `placeholder-missing`'s union comparison cannot see). Only checked for messages the source marks plural. |
 | `placeholder-extra` | error | A translation references a template field the source message does not use (usually a typo). |
 | `template-syntax` | error | A plural form is not a valid Go template. |
 | `plural-missing` | error | A translation lacks a CLDR plural category its language requires, for a message the source marks plural (more than one non-empty form). |
@@ -193,6 +205,25 @@ have. A field referenced only through a rebound `.` inside `{{range}}` or
 them parse; a custom function an application registers itself is invisible
 to msgparity (see Limitations).
 
+`placeholder-missing` compares the *union* of fields across a translation's
+plural forms against the source's union — fast to state, but blind to a
+field one form drops while a sibling form keeps it.
+`placeholder-missing-form` instead requires every field common to *all* of
+the source's own forms (their intersection, so a source `one` form that
+never used `{{.Count}}` does not force `{{.Count}}` into a translation's
+`one` form) to appear in each individual translation form, with one
+exemption: `--count-field` (`Count` by default). go-i18n's own README shows
+`PluralCount` and a `TemplateData["Count"]` passed side by side —
+`PluralCount` drives which plural form is selected, `Count` is the
+application's own choice of field name for displaying that same number, and
+some languages' `one`/`two`/`zero` forms grammatically imply the count
+without spelling it out ("un artículo", not "1 artículo"). go-i18n itself
+only auto-populates `TemplateData` when a caller passes `PluralCount` but
+leaves `TemplateData` `nil`, and does so under the key `"PluralCount"`, not
+`"Count"` (`i18n/localizer.go`, `LocalizeWithTag`) — so the field name this
+exemption should key on is a project's own convention, not something
+go-i18n mandates, which is why it is a flag and not a hardcoded name.
+
 ### Plural categories
 
 `golang.org/x/text/feature/plural`'s `plural.Cardinal.MatchPlural` is
@@ -233,6 +264,12 @@ six categories) and Japanese (other only) — see `TestRequiredCategories`.
   `{{range}}` body is not detected as a top-level field. This is rare in
   translator-facing strings; ordinary `{{.Field}}` references are unaffected
   at any nesting depth `if` introduces (`if` does not rebind `.`).
+- Fields accessed on the rebound `.` inside `{{range}}`/`{{with}}` — the
+  loop element or the with's value, e.g. `{{.Lable}}` (typo of `Label`)
+  inside `{{range .Items}}...{{end}}` — cannot be checked for typos or
+  drops at all, in either translation direction. msgparity has no way to
+  know what type `.Items`'s elements are, or what fields a correct one
+  should have, from the message file alone.
 - Locale matching for `--source` is an exact BCP 47 tag match against the
   tag go-i18n's own filename parser derives (`en.toml` → `en`). `en-US.toml`
   is not matched by `--source en`.

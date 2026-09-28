@@ -33,6 +33,13 @@ const (
 	// field name, which go-i18n either renders as "<no value>" (map
 	// TemplateData) or fails to render at all (struct TemplateData).
 	RulePlaceholderExtra = "placeholder-extra"
+	// RulePlaceholderMissingForm fires when one specific plural form of a
+	// translation drops a field every one of the source message's own
+	// forms uses (excluding Options.CountField), even though the
+	// translation's other forms keep it — a bug RulePlaceholderMissing
+	// cannot see because it only compares the union of fields across all
+	// of a translation's forms.
+	RulePlaceholderMissingForm = "placeholder-missing-form"
 	// RuleTemplateSyntax fires when a plural form fails to parse as a Go
 	// template.
 	RuleTemplateSyntax = "template-syntax"
@@ -94,6 +101,18 @@ type Options struct {
 	// "en") of the locale every other locale is checked against. Defaults
 	// to "en" when empty.
 	Source string
+	// CountField is the TemplateData field name RulePlaceholderMissingForm
+	// treats as the plural count, and so does not require in every plural
+	// form. Defaults to "Count" when empty — the field name go-i18n's own
+	// README example uses alongside PluralCount, and the one every
+	// msgparity fixture and the README's own examples use. It is
+	// configurable because this is an application-level naming
+	// convention, not something go-i18n enforces: go-i18n itself only
+	// auto-populates TemplateData when the caller leaves it nil, and does
+	// so under the key "PluralCount", not "Count" (see localizer.go in
+	// nicksnyder/go-i18n/v2/i18n). A project that follows that fallback,
+	// or names its own count field something else, needs this flag.
+	CountField string
 }
 
 // Result is the outcome of checking one set of message files.

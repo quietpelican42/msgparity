@@ -23,6 +23,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	sourceFlag := fs.String("source", "en", "locale every other locale's messages are checked against")
 	formatFlag := fs.String("format", "text", "output format: text, json or github")
+	countFieldFlag := fs.String("count-field", "Count", "TemplateData field name treated as the plural count, exempt per plural form from placeholder-missing-form")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `Usage: msgparity check [flags] <dir|files...>
 
@@ -48,7 +49,7 @@ Flags:
 		inputs = []string{"."}
 	}
 
-	result, err := msgparity.Check(inputs, msgparity.Options{Source: *sourceFlag})
+	result, err := msgparity.Check(inputs, msgparity.Options{Source: *sourceFlag, CountField: *countFieldFlag})
 	if err != nil {
 		fmt.Fprintf(stderr, "msgparity: %s\n", err)
 		return 2

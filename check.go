@@ -31,6 +31,11 @@ func Check(input []string, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("invalid source locale %q: %w", source, err)
 	}
 
+	countField := opts.CountField
+	if countField == "" {
+		countField = "Count"
+	}
+
 	dir, names, err := resolveInputs(input)
 	if err != nil {
 		return Result{}, err
@@ -82,7 +87,9 @@ func Check(input []string, opts Options) (Result, error) {
 	// Fields the source message uses, and whether the source template
 	// itself is well-formed, computed once and reused for every locale.
 	type srcInfo struct {
-		fields   map[string]bool
+		fields   map[string]bool            // union across every source form
+		common   map[string]bool            // intersection across every source form
+		byForm   map[string]map[string]bool // category -> fields used in that form
 		forms    map[string]string
 		isPlural bool
 	}
@@ -90,6 +97,7 @@ func Check(input []string, opts Options) (Result, error) {
 	for id, msg := range srcLocale.messages {
 		forms := messageForms(msg)
 		fields := map[string]bool{}
+		byForm := make(map[string]map[string]bool, len(forms))
 		srcPath := firstPath(srcLocale.files[id])
 		for cat, text := range forms {
 			f, err := templateFields(text, msg.LeftDelim, msg.RightDelim)
@@ -104,11 +112,12 @@ func Check(input []string, opts Options) (Result, error) {
 				})
 				continue
 			}
+			byForm[cat] = f
 			for k := range f {
 				fields[k] = true
 			}
 		}
-		srcInfos[id] = srcInfo{fields: fields, forms: forms, isPlural: len(forms) > 1}
+		srcInfos[id] = srcInfo{fields: fields, common: intersectFields(byForm), byForm: byForm, forms: forms, isPlural: len(forms) > 1}
 	}
 
 	for key, ls := range locales {
@@ -146,6 +155,7 @@ func Check(input []string, opts Options) (Result, error) {
 
 			transForms := messageForms(transMsg)
 			transFields := map[string]bool{}
+			transByForm := make(map[string]map[string]bool, len(transForms))
 			for cat, text := range transForms {
 				f, err := templateFields(text, transMsg.LeftDelim, transMsg.RightDelim)
 				if err != nil {
@@ -159,6 +169,7 @@ func Check(input []string, opts Options) (Result, error) {
 					})
 					continue
 				}
+				transByForm[cat] = f
 				for k := range f {
 					transFields[k] = true
 				}
@@ -196,6 +207,55 @@ func Check(input []string, opts Options) (Result, error) {
 					MessageID: id,
 					Message:   fmt.Sprintf("translation references %s the source message does not use: %s", pluralize(len(extra), "placeholder"), joinFields(extra)),
 				})
+			}
+
+			// Per-form check: the union-level check above can miss a
+			// placeholder a translation drops from one specific plural
+			// form while keeping it in another (e.g. a "one" form that
+			// drops {{.Name}} but a sibling "other" form that keeps it —
+			// the union still contains Name, so nothing looks wrong until
+			// a Polish user with count 1 gets a nameless message). Every
+			// field common to ALL of the source's own forms (not the
+			// union: a source "one" that never uses {{.Count}} should not
+			// force Count into a translation's "one" form) must appear in
+			// every translation form that exists, except countField,
+			// which go-i18n's own usage convention (see the README's
+			// "Count field" note) legitimately omits from forms like
+			// "one" where the count is implied by the grammar rather than
+			// spelled out.
+			if info.isPlural {
+				required := map[string]bool{}
+				for f := range info.common {
+					if f != countField {
+						required[f] = true
+					}
+				}
+				if len(required) > 0 {
+					for _, cat := range pluralCategories {
+						formFields, ok := transByForm[cat]
+						if !ok {
+							continue
+						}
+						var formMissing []string
+						for f := range required {
+							if !formFields[f] {
+								formMissing = append(formMissing, f)
+							}
+						}
+						if len(formMissing) == 0 {
+							continue
+						}
+						sort.Strings(formMissing)
+						result.Findings = append(result.Findings, Finding{
+							Rule:      RulePlaceholderMissingForm,
+							Severity:  SeverityError,
+							File:      transPath,
+							Locale:    ls.tag.String(),
+							MessageID: id,
+							Message:   fmt.Sprintf("%q form drops %s every source form uses: %s", cat, pluralize(len(formMissing), "placeholder"), joinFields(formMissing)),
+						})
+					}
+				}
 			}
 
 			if info.isPlural {
@@ -274,6 +334,30 @@ func pluralize(n int, noun string) string {
 		return fmt.Sprintf("1 %s", noun)
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// intersectFields returns the fields common to every non-empty set in
+// byForm. An empty or single-entry byForm returns that one set (or an empty
+// map for zero sets) unchanged: with nothing to intersect against, every
+// field in the only form present is, trivially, common to "all" forms.
+func intersectFields(byForm map[string]map[string]bool) map[string]bool {
+	common := map[string]bool{}
+	first := true
+	for _, fields := range byForm {
+		if first {
+			for f := range fields {
+				common[f] = true
+			}
+			first = false
+			continue
+		}
+		for f := range common {
+			if !fields[f] {
+				delete(common, f)
+			}
+		}
+	}
+	return common
 }
 
 func locKeys(locales map[string]*localeSet) string {

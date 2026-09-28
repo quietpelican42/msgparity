@@ -3,6 +3,7 @@ package msgparity
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +86,156 @@ other = "Hola, {{.Nmae}}!"
 	found := findingsWithRule(result.Findings, RulePlaceholderExtra)
 	if len(found) != 1 {
 		t.Fatalf("want 1 placeholder-extra finding, got %d: %+v", len(found), result.Findings)
+	}
+}
+
+// TestCheck_PlaceholderMissingForm_PerFormDrop is the false negative a
+// reviewer found: a translation's "one" form drops a placeholder every
+// source form uses, but a sibling "other" form keeps it, so the union of
+// fields across the translation's forms (what RulePlaceholderMissing
+// compares) still matches the source's union and stays quiet. Polish "one"
+// fires for PluralCount=1, so a Polish user asking for exactly one item
+// gets a message with no name in it and nothing ever flagged it.
+func TestCheck_PlaceholderMissingForm_PerFormDrop(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"en.toml": `[Items]
+one = "{{.Count}} item for {{.Name}}"
+other = "{{.Count}} items for {{.Name}}"
+`,
+		"pl.toml": `[Items]
+one = "{{.Count}} element"
+other = "{{.Count}} elementu dla {{.Name}}"
+`,
+	})
+	result, err := Check([]string{dir}, Options{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if union := findingsWithRule(result.Findings, RulePlaceholderMissing); len(union) != 0 {
+		t.Errorf("union-level placeholder-missing should stay quiet (that's the bug being fixed), got %+v", union)
+	}
+	found := findingsWithRule(result.Findings, RulePlaceholderMissingForm)
+	if len(found) != 1 {
+		t.Fatalf("want 1 placeholder-missing-form finding, got %d: %+v", len(found), result.Findings)
+	}
+	if found[0].Severity != SeverityError {
+		t.Errorf("severity = %s, want error", found[0].Severity)
+	}
+	if !strings.Contains(found[0].Message, `"one"`) || !strings.Contains(found[0].Message, "{{.Name}}") {
+		t.Errorf("message = %q, want it to name the \"one\" form and {{.Name}}", found[0].Message)
+	}
+}
+
+// TestCheck_PlaceholderMissingForm_SourceFormWithoutCount proves the
+// per-form check compares against the INTERSECTION of the source's own
+// forms, not their union: the source's "one" form never uses {{.Count}}
+// (English says "One item", not "1 item"), so a translation "one" form
+// that also omits it is not a bug.
+func TestCheck_PlaceholderMissingForm_SourceFormWithoutCount(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"en.toml": `[Items]
+one = "One item for {{.Name}}"
+other = "{{.Count}} items for {{.Name}}"
+`,
+		"es.toml": `[Items]
+one = "Un artículo para {{.Name}}"
+other = "{{.Count}} artículos para {{.Name}}"
+`,
+	})
+	result, err := Check([]string{dir}, Options{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(result.Findings) != 0 {
+		t.Errorf("want no findings, got %+v", result.Findings)
+	}
+}
+
+// TestCheck_PlaceholderMissingForm_CountFieldExempt proves the exemption:
+// the source uses {{.Count}} in every one of its own forms (so it would
+// otherwise be "common" and required everywhere), but a translation form
+// that omits it is still not a bug, because CountField ("Count" by
+// default) is how a caller passes go-i18n's PluralCount, and some
+// languages' one/two/zero forms legitimately imply the count in the
+// grammar instead of spelling it out.
+func TestCheck_PlaceholderMissingForm_CountFieldExempt(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"en.toml": `[Items]
+one = "{{.Count}} item for {{.Name}}"
+other = "{{.Count}} items for {{.Name}}"
+`,
+		"es.toml": `[Items]
+one = "Un artículo para {{.Name}}"
+other = "{{.Count}} artículos para {{.Name}}"
+`,
+	})
+	result, err := Check([]string{dir}, Options{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(result.Findings) != 0 {
+		t.Errorf("want no findings (Count is exempt from the per-form check), got %+v", result.Findings)
+	}
+}
+
+// TestCheck_PlaceholderMissingForm_CountFieldExempt_Configurable checks
+// that the same fixture as above flags a finding when --count-field names
+// a field the translation does not actually omit, proving the exemption is
+// keyed on the configured field name and not hardcoded.
+func TestCheck_PlaceholderMissingForm_CountFieldExempt_Configurable(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"en.toml": `[Items]
+one = "{{.Count}} item for {{.Name}}"
+other = "{{.Count}} items for {{.Name}}"
+`,
+		"es.toml": `[Items]
+one = "Un artículo para {{.Name}}"
+other = "{{.Count}} artículos para {{.Name}}"
+`,
+	})
+	result, err := Check([]string{dir}, Options{CountField: "Nope"})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	found := findingsWithRule(result.Findings, RulePlaceholderMissingForm)
+	if len(found) != 1 {
+		t.Fatalf("want 1 placeholder-missing-form finding when Count is not the configured count field, got %d: %+v", len(found), result.Findings)
+	}
+	if !strings.Contains(found[0].Message, "{{.Count}}") {
+		t.Errorf("message = %q, want it to name {{.Count}}", found[0].Message)
+	}
+}
+
+// TestCheck_PlaceholderMissingForm_FewFormDrop covers a translation
+// category the source doesn't even have (Polish "few" has no English
+// counterpart): the per-form check still applies the source's common
+// fields to it.
+func TestCheck_PlaceholderMissingForm_FewFormDrop(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"en.toml": `[Items]
+one = "{{.Count}} item for {{.Name}}"
+other = "{{.Count}} items for {{.Name}}"
+`,
+		"pl.toml": `[Items]
+one = "{{.Count}} element dla {{.Name}}"
+few = "{{.Count}} elementy"
+many = "{{.Count}} elementów dla {{.Name}}"
+other = "{{.Count}} elementu dla {{.Name}}"
+`,
+	})
+	result, err := Check([]string{dir}, Options{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if plural := findingsWithRule(result.Findings, RulePluralMissing); len(plural) != 0 {
+		t.Errorf("pl now supplies every required category, want no plural-missing findings, got %+v", plural)
+	}
+	found := findingsWithRule(result.Findings, RulePlaceholderMissingForm)
+	if len(found) != 1 {
+		t.Fatalf("want 1 placeholder-missing-form finding, got %d: %+v", len(found), result.Findings)
+	}
+	if !strings.Contains(found[0].Message, `"few"`) {
+		t.Errorf("message = %q, want it to name the \"few\" form", found[0].Message)
 	}
 }
 
