@@ -11,7 +11,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/__GH_OWNER__/msgparity"
+	"github.com/quietpelican42/msgparity"
 )
 
 func main() {

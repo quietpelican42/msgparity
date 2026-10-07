@@ -1,4 +1,4 @@
-module github.com/__GH_OWNER__/msgparity
+module github.com/quietpelican42/msgparity
 
 go 1.27.1
 

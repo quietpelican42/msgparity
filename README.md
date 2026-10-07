@@ -85,13 +85,13 @@ only its own message format and does not read go-i18n files.
 ## Installation
 
 ```sh
-go install github.com/__GH_OWNER__/msgparity/cmd/msgparity@latest
+go install github.com/quietpelican42/msgparity/cmd/msgparity@latest
 ```
 
 Or as a library:
 
 ```sh
-go get github.com/__GH_OWNER__/msgparity
+go get github.com/quietpelican42/msgparity
 ```
 
 ## Usage
